@@ -1,0 +1,7 @@
+{
+  "name": "ChromaLab - Darkroom Corrector",
+  "description": "A professional tool for analog color photographers to calculate filtration adjustments (YMC) by visually correcting test prints.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
