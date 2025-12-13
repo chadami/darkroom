@@ -1,8 +1,21 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { AnalysisResult } from "../types";
 
-// Safety check for API Key presence
-const apiKey = process.env.API_KEY || '';
+// Safety check for API Key presence that doesn't crash in browser
+const getApiKey = () => {
+  try {
+    // Check for process.env safe access
+    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+      return process.env.API_KEY;
+    }
+    // Fallback attempts
+    return process.env.API_KEY || ''; 
+  } catch (e) {
+    return '';
+  }
+};
+
+const apiKey = getApiKey();
 
 const ai = new GoogleGenAI({ apiKey });
 
