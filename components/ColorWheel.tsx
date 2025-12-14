@@ -4,14 +4,27 @@ interface ColorWheelProps {
   size: number;
   onChange: (angle: number, distance: number) => void;
   isProcessing?: boolean;
+  forcedValue?: { angle: number; distance: number } | null;
 }
 
-const ColorWheel: React.FC<ColorWheelProps> = ({ size, onChange, isProcessing }) => {
+const ColorWheel: React.FC<ColorWheelProps> = ({ size, onChange, isProcessing, forcedValue }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
 
   const radius = size / 2;
+  const maxDist = radius - 10;
+
+  useEffect(() => {
+    if (forcedValue) {
+      const { angle, distance } = forcedValue;
+      // Convert normalized distance back to pixels
+      const r = Math.min(distance, 1) * maxDist;
+      const x = Math.cos(angle) * r;
+      const y = Math.sin(angle) * r;
+      setPosition({ x, y });
+    }
+  }, [forcedValue, maxDist]);
 
   const handleInteraction = (clientX: number, clientY: number) => {
     if (!containerRef.current) return;
@@ -27,7 +40,6 @@ const ColorWheel: React.FC<ColorWheelProps> = ({ size, onChange, isProcessing })
     let angle = Math.atan2(dy, dx);
 
     // Constrain to circle
-    const maxDist = radius - 10; // Padding
     if (dist > maxDist) {
       dx = Math.cos(angle) * maxDist;
       dy = Math.sin(angle) * maxDist;
