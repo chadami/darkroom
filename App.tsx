@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Upload, Camera, Wand2, Info, RefreshCw, Pipette } from 'lucide-react';
 import ColorWheel from './components/ColorWheel';
-import { calculateFiltration, getSVGFilterMatrix, formatFiltration, normalizeToYM, rgbToWheelPosition, addFiltration } from './utils/colorMath';
+import { calculateFiltration, getSVGFilterMatrix, formatFiltration, normalizeToYM, addFiltration, calculateCorrectionFromPoint } from './utils/colorMath';
 import { analyzeColorCast } from './services/gemini';
 import { ColorCorrection } from './types';
 
@@ -13,6 +13,9 @@ const App: React.FC = () => {
   
   // State for the Adjustment (Calculated from the wheel)
   const [adjustment, setAdjustment] = useState<ColorCorrection>({ y: 0, m: 0, c: 0 });
+  
+  // Track current wheel position for relative math
+  const [wheelState, setWheelState] = useState<{ angle: number, distance: number }>({ angle: 0, distance: 0 });
   
   const [filterMatrix, setFilterMatrix] = useState<string>('1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -29,17 +32,19 @@ const App: React.FC = () => {
 
   // Handle Wheel Changes
   const handleWheelChange = (angle: number, distance: number) => {
+    // Update local state
+    setWheelState({ angle, distance });
+
     // 1. Calculate visual filter (RGB) for the CSS/SVG
-    // The visual filter is now inverted (Complementary) inside the helper
     const matrix = getSVGFilterMatrix(angle, distance);
     setFilterMatrix(matrix);
 
     // 2. Calculate Adjustment Values (CMY)
-    // The adjustment is now based on correcting the cast
     const adj = calculateFiltration(angle, distance);
     setAdjustment(adj);
     
-    setWheelOverride(null);
+    // Clear override if it was active and user moved manually
+    if (wheelOverride) setWheelOverride(null);
   };
 
   // Handle Base Pack Inputs
@@ -56,6 +61,8 @@ const App: React.FC = () => {
     const rect = img.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+    
+    // Map click coordinates to natural image size
     const naturalX = x * (img.naturalWidth / rect.width);
     const naturalY = y * (img.naturalHeight / rect.height);
 
@@ -65,22 +72,25 @@ const App: React.FC = () => {
     const ctx = canvas.getContext('2d');
     
     if (ctx) {
+      // Draw the ORIGINAL pixel
       ctx.drawImage(img, naturalX, naturalY, 1, 1, 0, 0, 1, 1);
       const pixel = ctx.getImageData(0, 0, 1, 1).data;
       const [r, g, b] = pixel;
 
-      const { angle, distance } = rgbToWheelPosition(r, g, b);
+      // Calculate correction based on current filter state + pixel value
+      const result = calculateCorrectionFromPoint(r, g, b, wheelState.angle, wheelState.distance);
 
-      // Force wheel to this position
-      setWheelOverride({ angle, distance });
+      // Force wheel to new position
+      setWheelOverride({ angle: result.angle, distance: result.distance });
       
       // Trigger updates immediately
-      const matrix = getSVGFilterMatrix(angle, distance);
-      setFilterMatrix(matrix);
-      const adj = calculateFiltration(angle, distance);
-      setAdjustment(adj);
+      handleWheelChange(result.angle, result.distance);
       
-      setAiMessage(`Sampled Color Cast: R${r} G${g} B${b}`);
+      // Format feedback message
+      const ySign = result.correction.y >= 0 ? '+' : '';
+      const mSign = result.correction.m >= 0 ? '+' : '';
+      const msg = `Cast Detected. Correction Applied: ${ySign}${Math.round(result.correction.y)}Y ${mSign}${Math.round(result.correction.m)}M`;
+      setAiMessage(msg);
     }
 
     setIsPicking(false);
@@ -94,9 +104,13 @@ const App: React.FC = () => {
         if (event.target?.result) {
           setImageSrc(event.target.result as string);
           setAiMessage(null);
+          // Reset filtration on new image load
+          const initialAngle = 0;
+          const initialDist = 0;
+          setWheelState({ angle: initialAngle, distance: initialDist });
           setFilterMatrix('1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 1 0');
           setAdjustment({ y: 0, m: 0, c: 0 });
-          setWheelOverride({ angle: 0, distance: 0 });
+          setWheelOverride({ angle: initialAngle, distance: initialDist });
         }
       };
       reader.readAsDataURL(e.target.files[0]);
@@ -121,10 +135,7 @@ const App: React.FC = () => {
       
       // AI returns a "Suggestion" (Correction), so we set it as adjustment
       setAdjustment(aiAdj);
-      
-      // Note: We don't move the wheel for AI results currently as AI returns YMC values directly,
-      // creating a 1:1 map back to wheel angle is complex due to normalization.
-      // We accept the discrepancy for now or could implement a reverse map later.
+      // Note: We don't have a direct map back to wheel angle for AI results yet.
       
     } catch (err) {
       setAiMessage("Could not analyze image. Please try again.");
@@ -217,7 +228,7 @@ const App: React.FC = () => {
               <button 
                 onClick={() => setIsPicking(!isPicking)}
                 className={`p-2 backdrop-blur text-white rounded-full transition-colors ${isPicking ? 'bg-white text-black' : 'bg-black/50 hover:bg-black/70'}`}
-                title="White Balance Picker"
+                title="Eyedropper Tool (Gray Point)"
               >
                 <Pipette size={18} />
               </button>
